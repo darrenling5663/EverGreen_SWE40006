@@ -1,0 +1,32 @@
+EVERGREEN EXPENSE V11 — MONEY GUARDIAN
+
+1. Extract the ZIP with Windows File Explorer: right-click > Extract All.
+2. Open the extracted evergreen-expense folder.
+3. Click Explorer's address bar, type powershell, and press Enter.
+4. In that new PowerShell window run:
+
+   npm.cmd install
+   npm.cmd run dev -- --port 5185 --strictPort
+
+5. Open http://localhost:5185/ in Chrome.
+
+To test:
+   npm.cmd test
+
+To check production build:
+   npm.cmd run build
+
+If port 5185 is in use, stop the older Vite terminal with Ctrl+C,
+or run on a different port and open the exact URL Vite displays.
+
+New pages:
+- Smart Transfers — records own-account moves separately; review and manually reclassify possible transfers
+- Monthly Bills — new Bill Shock Detector; enter actual charges for a selected month
+- Purchases & Refunds — track return deadlines, warranty dates and refund status
+- Maturity Calendar — fixed deposit reminders and estimated interest based on manual dates and rates
+
+Existing expense functions, personalization, savings, and billing remain.
+All information stays in your browser. This version does NOT connect to any bank,
+send background reminders, or move real money.
+
+V11.2: In the sidebar, use "Reset everything to zero" to remove demo entries, custom labels and the budget. Confirm the warning. The empty state will persist after refreshing.
