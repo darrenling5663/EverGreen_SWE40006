@@ -7,6 +7,7 @@
 ```powershell
 npm.cmd install
 npm.cmd run dev -- --port 5185 --strictPort
+npm install firebase -- 
 ```
 
 Open http://localhost:5185. For a build: `npm.cmd run build`. For unit tests: `npm.cmd test`.
