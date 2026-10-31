@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ArrowRight, ArrowDownRight, ArrowUpRight, CalendarDays, ClipboardList, Compass, CreditCard, Download, Minus, Plus, ShoppingBag, Wallet, Sparkles, TrendingUp, ArrowLeftRight, AlertTriangle, ShoppingBag as PurchaseIcon, Landmark } from 'lucide-react'
+import { ArrowRight, ArrowDownRight, ArrowUpRight, CalendarDays, ClipboardList, Compass, CreditCard, Download, Minus, Plus, ShoppingBag, Wallet, Sparkles, TrendingUp, ArrowLeftRight, AlertTriangle, ShoppingBag as PurchaseIcon, Landmark, LogOut, User } from 'lucide-react'
+import { auth } from './firebase'
+import { onAuthStateChanged, signOut } from 'firebase/auth'
+import Auth from './components/Auth'
 import Sidebar from './components/Sidebar'
 import Header from './components/Header'
 import StatCard from './components/StatCard'
@@ -42,6 +45,18 @@ const pages = {
 }
 
 export default function App() {
+  const [currentUser, setCurrentUser] = useState(null)
+  const [authLoading, setAuthLoading] = useState(true)
+
+  // Listen to Firebase Auth state
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setCurrentUser(user)
+      setAuthLoading(false)
+    })
+    return () => unsubscribe()
+  }, [])
+
   const { expenses, loading, add, update, remove, clear: clearExpenses } = useExpenses()
   const { budget, setBudget } = useBudget()
   const bills = useFinanceCollection('evergreen-bills-v1', initialBills)
@@ -49,6 +64,7 @@ export default function App() {
   const transfers = useFinanceCollection('evergreen-transfers-v11', [])
   const purchases = useFinanceCollection('evergreen-purchases-v11', [])
   const profile = usePreferences()
+  
   const [page, setPage] = useState('dashboard')
   const [mobileNav, setMobileNav] = useState(false)
   const [modal, setModal] = useState({ open: false, expense: null })
@@ -63,14 +79,17 @@ export default function App() {
   const analytics = useMemo(() => getAnalytics(expenses), [expenses])
   const today = dateKey(new Date())
   const thisMonth = monthKey(new Date())
+  
   const guardianCounts = {
     transfers: getTransferCandidates(expenses, transfers.records).length,
     bills: getBillChanges(bills.records, thisMonth).filter(item => item.warning).length,
     purchases: purchases.records.filter(item => purchaseDeadline(item, today)?.urgent).length,
     maturity: assets.records.filter(item => depositForecast(item, today)?.soon).length,
   }
+  
   const knownCategories = [...new Set([...profile.preferences.categories, ...expenses.map(e=>e.category), ...bills.records.map(b=>b.category)].filter(Boolean))]
   const knownBanks = [...new Set([...profile.preferences.banks, ...expenses.map(e=>e.bankName)].filter(Boolean))]
+  
   const filtered = useMemo(() => expenses.filter(item => {
     const query = search.trim().toLowerCase()
     const searchable = `${item.description} ${item.notes || ''} ${item.merchant || ''} ${item.bankName || ''} ${Array.isArray(item.tags) ? item.tags.join(' ') : (item.tags || '')}`.toLowerCase()
@@ -83,19 +102,23 @@ export default function App() {
   }), [expenses, search, category, paymentFilter, bankFilter, sort])
 
   useEffect(() => { if (!toast) return; const id = setTimeout(() => setToast(''), 3200); return () => clearTimeout(id) }, [toast])
+  
   const closeModal = useCallback(() => setModal({ open: false, expense: null }), [])
   const cancelDelete = useCallback(() => setDeleting(null), [])
   const openAdd = () => setModal({ open: true, expense: null })
   const openEdit = expense => setModal({ open: true, expense })
+  
   const save = values => {
     if (modal.expense) { update(modal.expense.id, values); setToast('Expense updated successfully') }
     else { add(values); setToast('Expense added successfully') }
     setModal({ open: false, expense: null })
   }
+  
   const exportCsv = () => { downloadExpensesCsv(filtered); setToast(`Exported ${filtered.length} expense${filtered.length === 1 ? '' : 's'} as CSV`) }
   const saveBudget = value => { const ok = setBudget(value); if(ok) setToast('Monthly budget updated'); return ok }
   const deleteExpense = () => { if (!deleting) return; remove(deleting.id); setDeleting(null); setToast('Expense deleted') }
   const changePage = next => { setPage(next); setMobileNav(false); window.scrollTo({ top: 0, behavior: 'auto' }) }
+  
   const resetDemo = () => {
     if (!window.confirm('Reset everything to zero? This will permanently clear all expenses, monthly bills, savings and investment balances, transfers, purchases, your monthly budget, and custom names. This cannot be undone.')) return
     clearExpenses()
@@ -104,7 +127,7 @@ export default function App() {
     transfers.clear()
     purchases.clear()
     setBudget(0)
-    profile.reset() // Keep the built-in category/bank suggestions so forms remain usable.
+    profile.reset()
     setSearch('')
     setCategory('All')
     setPaymentFilter('All')
@@ -115,29 +138,67 @@ export default function App() {
     setToast('All financial data cleared. Starting from RM 0.00.')
   }
 
-  return <div className="app-shell">
-    <Sidebar activeView={page} open={mobileNav} onNavigate={changePage} onClose={() => setMobileNav(false)} onAdd={openAdd} onReset={resetDemo} />
-    <main className="app-main">
-      <div className="page-wrap">
-        <Header title={pages[page].title} subtitle={pages[page].subtitle} onMenu={() => setMobileNav(true)} onAdd={openAdd} showAdd={page === 'expenses' || page === 'spending'} />
-        {loading ? <LoadingSkeleton /> : <>
-          {page === 'dashboard' && <Dashboard data={analytics} budget={budget} guardianCounts={guardianCounts} onNavigate={changePage} onBudget={saveBudget} onEdit={openEdit} onDelete={setDeleting} onViewAll={() => changePage('expenses')} onAdd={openAdd} />}
-          {page === 'expenses' && <ExpensesView expenses={filtered} totalCount={expenses.length} search={search} setSearch={setSearch} category={category} setCategory={setCategory} paymentFilter={paymentFilter} setPaymentFilter={setPaymentFilter} bankFilter={bankFilter} setBankFilter={setBankFilter} bankOptions={knownBanks} sort={sort} setSort={setSort} onEdit={openEdit} onDelete={setDeleting} onAdd={openAdd} onExport={exportCsv} categories={knownCategories} />}
-          {page === 'analytics' && <AnalyticsView data={analytics} budget={budget} />}
-          {page === 'spending' && <SpendingExplorer expenses={expenses} onAdd={openAdd} onEdit={openEdit} onNavigate={() => changePage('expenses')} />}
-          {page === 'bills' && <BillsPlanner bills={bills.records} add={bills.add} update={bills.update} remove={bills.remove} notify={setToast} preferences={profile.preferences} />}
-          {page === 'wealth' && <WealthWorkspace assets={assets.records} add={assets.add} update={assets.update} remove={assets.remove} notify={setToast} preferences={profile.preferences} />}
-          {page === 'transfers' && <TransferGuardian expenses={expenses} transfers={transfers.records} add={transfers.add} remove={transfers.remove} expenseRemove={remove} banks={knownBanks} notify={setToast} />}
-          {page === 'purchases' && <PurchaseTracker purchases={purchases.records} add={purchases.add} update={purchases.update} remove={purchases.remove} expenses={expenses} merchants={[...new Set([...profile.preferences.merchants,...expenses.map(e=>e.merchant)].filter(Boolean))]} notify={setToast} />}
-          {page === 'maturity' && <MaturityCalendar assets={assets.records} add={assets.add} update={assets.update} banks={knownBanks} notify={setToast} />}
-          {page === 'customize' && <PersonalizeWorkspace preferences={profile.preferences} add={profile.add} remove={profile.remove} reset={profile.reset} expenses={expenses} bills={bills.records} assets={assets.records} notify={setToast} />}
-        </>}
-      </div>
-    </main>
-    <ExpenseModal open={modal.open} expense={modal.expense} onClose={closeModal} onSave={save} preferences={profile.preferences} />
-    <ConfirmDialog expense={deleting} onCancel={cancelDelete} onConfirm={deleteExpense} />
-    <Toast message={toast} />
-  </div>
+  const handleSignOut = async () => {
+    try {
+      await signOut(auth)
+      setToast('Signed out successfully')
+    } catch (err) {
+      setToast('Failed to sign out')
+    }
+  }
+
+  // 1. Show loading screen while Firebase checks Auth status
+  if (authLoading) {
+    return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', fontFamily: 'sans-serif', color: '#475569' }}>
+      Loading EverGreen Expense...
+    </div>
+  }
+
+  // 2. Show Auth screen if not logged in
+  if (!currentUser) {
+    return <Auth onAuthSuccess={(user) => setCurrentUser(user)} />
+  }
+
+  // 3. Render main application when authenticated
+  return (
+    <div className="app-shell">
+      <Sidebar activeView={page} open={mobileNav} onNavigate={changePage} onClose={() => setMobileNav(false)} onAdd={openAdd} onReset={resetDemo} />
+      <main className="app-main">
+        <div className="page-wrap">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0 0 0' }}>
+            <Header title={pages[page].title} subtitle={pages[page].subtitle} onMenu={() => setMobileNav(true)} onAdd={openAdd} showAdd={page === 'expenses' || page === 'spending'} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', paddingRight: '1rem' }}>
+              <span style={{ fontSize: '0.875rem', color: '#64748b', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <User size={16} /> {currentUser.email}
+              </span>
+              <button 
+                onClick={handleSignOut}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '6px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', backgroundColor: '#ffffff', color: '#334155', cursor: 'pointer', fontSize: '0.85rem' }}
+              >
+                <LogOut size={15} /> Sign Out
+              </button>
+            </div>
+          </div>
+
+          {loading ? <LoadingSkeleton /> : <>
+            {page === 'dashboard' && <Dashboard data={analytics} budget={budget} guardianCounts={guardianCounts} onNavigate={changePage} onBudget={saveBudget} onEdit={openEdit} onDelete={setDeleting} onViewAll={() => changePage('expenses')} onAdd={openAdd} />}
+            {page === 'expenses' && <ExpensesView expenses={filtered} totalCount={expenses.length} search={search} setSearch={setSearch} category={category} setCategory={setCategory} paymentFilter={paymentFilter} setPaymentFilter={setPaymentFilter} bankFilter={bankFilter} setBankFilter={setBankFilter} bankOptions={knownBanks} sort={sort} setSort={setSort} onEdit={openEdit} onDelete={setDeleting} onAdd={openAdd} onExport={exportCsv} categories={knownCategories} />}
+            {page === 'analytics' && <AnalyticsView data={analytics} budget={budget} />}
+            {page === 'spending' && <SpendingExplorer expenses={expenses} onAdd={openAdd} onEdit={openEdit} onNavigate={() => changePage('expenses')} />}
+            {page === 'bills' && <BillsPlanner bills={bills.records} add={bills.add} update={bills.update} remove={bills.remove} notify={setToast} preferences={profile.preferences} />}
+            {page === 'wealth' && <WealthWorkspace assets={assets.records} add={assets.add} update={assets.update} remove={assets.remove} notify={setToast} preferences={profile.preferences} />}
+            {page === 'transfers' && <TransferGuardian expenses={expenses} transfers={transfers.records} add={transfers.add} remove={transfers.remove} expenseRemove={remove} banks={knownBanks} notify={setToast} />}
+            {page === 'purchases' && <PurchaseTracker purchases={purchases.records} add={purchases.add} update={purchases.update} remove={purchases.remove} expenses={expenses} merchants={[...new Set([...profile.preferences.merchants,...expenses.map(e=>e.merchant)].filter(Boolean))]} notify={setToast} />}
+            {page === 'maturity' && <MaturityCalendar assets={assets.records} add={assets.add} update={assets.update} banks={knownBanks} notify={setToast} />}
+            {page === 'customize' && <PersonalizeWorkspace preferences={profile.preferences} add={profile.add} remove={profile.remove} reset={profile.reset} expenses={expenses} bills={bills.records} assets={assets.records} notify={setToast} />}
+          </>}
+        </div>
+      </main>
+      <ExpenseModal open={modal.open} expense={modal.expense} onClose={closeModal} onSave={save} preferences={profile.preferences} />
+      <ConfirmDialog expense={deleting} onCancel={cancelDelete} onConfirm={deleteExpense} />
+      <Toast message={toast} />
+    </div>
+  )
 }
 
 function Dashboard({ data, budget, guardianCounts, onNavigate, onBudget, onEdit, onDelete, onViewAll, onAdd }) {
@@ -191,6 +252,7 @@ function AnalyticsView({ data, budget }) {
   const trendText = trendStatus === 'up' ? 'Higher than last month' : trendStatus === 'down' ? 'Lower than last month' : trendStatus === 'flat' ? 'Unchanged from last month' : 'No percentage comparison available'
   const trendValue = trendStatus === 'no-baseline' ? 'New spending' : `${trendStatus === 'up' ? '+' : trendStatus === 'down' ? '−' : ''}${Math.abs(trendPercent || 0).toFixed(1)}%`
   const Icon = trendStatus === 'up' ? ArrowUpRight : trendStatus === 'down' ? ArrowDownRight : Minus
+
   return <div className="page-sections">
     <div className="section-intro"><div><span className="eyebrow">SPENDING INTELLIGENCE</span><h2>See the bigger picture.</h2><p>Simple insights grounded in the expenses you have actually recorded.</p></div></div>
     <section className="insight-grid" aria-label="Spending insights">
