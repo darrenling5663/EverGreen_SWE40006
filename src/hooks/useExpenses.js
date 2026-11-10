@@ -1,42 +1,106 @@
-import { useEffect, useMemo, useState } from 'react'
-import { expenseRepository } from '../services/expenseRepository'
+import { useState, useEffect } from 'react'
+import { db, auth } from '../firebase'
+import { 
+  collection, 
+  onSnapshot, 
+  addDoc, 
+  updateDoc, 
+  deleteDoc, 
+  doc, 
+  query, 
+  orderBy,
+  writeBatch,
+  getDocs
+} from 'firebase/firestore'
+import { onAuthStateChanged } from 'firebase/auth'
 
 export function useExpenses() {
   const [expenses, setExpenses] = useState([])
   const [loading, setLoading] = useState(true)
+  const [user, setUser] = useState(null)
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setExpenses(expenseRepository.load())
-      setLoading(false)
-    }, 320)
-    return () => clearTimeout(timer)
+    // Track authenticated user
+    const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser)
+      if (!currentUser) {
+        setExpenses([])
+        setLoading(false)
+      }
+    })
+    return () => unsubscribeAuth()
   }, [])
 
   useEffect(() => {
-    if (!loading) expenseRepository.save(expenses)
-  }, [expenses, loading])
+    if (!user) return
 
-  const actions = useMemo(() => ({
-    add(expense) {
-      setExpenses((current) => [
-        { ...expense, id: crypto.randomUUID() },
-        ...current,
-      ])
-    },
-    update(id, values) {
-      setExpenses((current) => current.map((item) => item.id === id ? { ...item, ...values } : item))
-    },
-    remove(id) {
-      setExpenses((current) => current.filter((item) => item.id !== id))
-    },
-    reset() {
-      setExpenses(expenseRepository.reset())
-    },
-    clear() {
-      setExpenses(expenseRepository.clear())
-    },
-  }), [])
+    setLoading(true)
+    // Reference: users/{uid}/expenses
+    const expensesRef = collection(db, 'users', user.uid, 'expenses')
+    const q = query(expensesRef, orderBy('date', 'desc'))
 
-  return { expenses, loading, ...actions }
+    // Real-time Firestore sync
+    const unsubscribeSnapshot = onSnapshot(q, (snapshot) => {
+      const docs = snapshot.docs.map((docItem) => ({
+        id: docItem.id,
+        ...docItem.data(),
+      }))
+      setExpenses(docs)
+      setLoading(false)
+    }, (err) => {
+      console.error("Error fetching expenses: ", err)
+      setLoading(false)
+    })
+
+    return () => unsubscribeSnapshot()
+  }, [user])
+
+  const add = async (expenseData) => {
+    if (!user) return
+    try {
+      await addDoc(collection(db, 'users', user.uid, 'expenses'), {
+        ...expenseData,
+        createdAt: new Date().toISOString()
+      })
+    } catch (err) {
+      console.error("Error adding expense: ", err)
+    }
+  }
+
+  const update = async (id, updatedValues) => {
+    if (!user || !id) return
+    try {
+      const docRef = doc(db, 'users', user.uid, 'expenses', id)
+      await updateDoc(docRef, updatedValues)
+    } catch (err) {
+      console.error("Error updating expense: ", err)
+    }
+  }
+
+  const remove = async (id) => {
+    if (!user || !id) return
+    try {
+      const docRef = doc(db, 'users', user.uid, 'expenses', id)
+      await deleteDoc(docRef)
+    } catch (err) {
+      console.error("Error deleting expense: ", err)
+    }
+  }
+
+  const clear = async () => {
+    if (!user) return
+    try {
+      const expensesRef = collection(db, 'users', user.uid, 'expenses')
+      const snapshot = await getDocs(expensesRef)
+      const batch = writeBatch(db)
+      snapshot.docs.forEach((docItem) => {
+        batch.delete(docItem.ref)
+      })
+      await batch.commit()
+    } catch (err) {
+      console.error("Error clearing expenses: ", err)
+    }
+  }
+
+  return { expenses, loading, add, update, remove, clear }
 }
